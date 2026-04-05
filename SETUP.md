@@ -10,9 +10,9 @@ A web service where users:
 2. Take a selfie using their camera
 3. Get all photos with their face organized in a new Drive folder
 
-**Tech:** Next.js frontend + FastAPI backend + Celery workers + InsightFace AI
+**Tech:** Next.js UI + FastAPI API + Celery workers + InsightFace AI
 
-**Deployment:** Render (backend) + Vercel (frontend) = **FREE**
+**Deployment:** Render (API) + Vercel (UI) = **FREE**
 
 ---
 
@@ -92,8 +92,8 @@ A web service where users:
 
 ```bash
 # Extract the downloaded ZIP
-unzip whodis-clean.zip
-cd whodis-clean
+unzip WhoDis.zip
+cd WhoDis
 ```
 
 ### Step 2.2: Initialize Git
@@ -127,7 +127,7 @@ git push -u origin main
 
 ---
 
-## 🎯 Part 3: Deploy Backend to Render (15 minutes)
+## 🎯 Part 3: Deploy API to Render (15 minutes)
 
 ### Step 3.1: Create Render Account
 
@@ -162,17 +162,17 @@ git push -u origin main
 5. **COPY** the "Internal Redis URL" (looks like `redis://red-xxxxx:6379`)
    - Save this too!
 
-### Step 3.4: Create Web Service (Backend API)
+### Step 3.4: Create Web Service (API)
 
 1. Click "New +" → "Web Service"
 2. Click "Build and deploy from a Git repository"
 3. Click "Next"
 4. Find your `whodis` repository and click "Connect"
 5. Fill in:
-   - **Name:** `whodis-backend`
+   - **Name:** `whodis-api`
    - **Region:** Same as database/redis
    - **Branch:** `main`
-   - **Root Directory:** `backend`
+   - **Root Directory:** `api`
    - **Runtime:** `Python 3`
    - **Build Command:** 
      ```
@@ -240,7 +240,7 @@ git push -u origin main
 
 8. Click "Create Web Service"
 9. Wait for deployment (~5-10 minutes)
-10. When it says "Live", **COPY your backend URL** (looks like `https://whodis-backend.onrender.com`)
+10. When it says "Live", **COPY your API URL** (looks like `https://whodis-api.onrender.com`)
 
 ### Step 3.5: Create Background Worker
 
@@ -252,7 +252,7 @@ git push -u origin main
    - **Name:** `whodis-worker`
    - **Region:** Same as others
    - **Branch:** `main`
-   - **Root Directory:** `backend`
+   - **Root Directory:** `api`
    - **Runtime:** `Python 3`
    - **Build Command:**
      ```
@@ -270,7 +270,7 @@ git push -u origin main
 
 ### Step 3.6: Initialize Database
 
-1. Go to your `whodis-backend` service (the Web Service)
+1. Go to your `whodis-api` service (the Web Service)
 2. Click "Shell" tab (in the left menu)
 3. Wait for shell to connect
 4. Type this command and press Enter:
@@ -279,11 +279,11 @@ git push -u origin main
    ```
 5. You should see: "✓ Database tables created"
 
-### Step 3.7: Test Backend
+### Step 3.7: Test API
 
 Open a new browser tab and go to:
 ```
-https://whodis-backend.onrender.com
+https://whodis-api.onrender.com
 ```
 
 You should see:
@@ -291,11 +291,11 @@ You should see:
 {"service":"WhoDis API","status":"running","version":"1.0.0"}
 ```
 
-**✅ Backend is live!**
+**✅ API is live!**
 
 ---
 
-## 🎯 Part 4: Deploy Frontend to Vercel (5 minutes)
+## 🎯 Part 4: Deploy UI to Vercel (5 minutes)
 
 ### Step 4.1: Create Vercel Account
 
@@ -311,7 +311,7 @@ You should see:
 3. Click "Import"
 4. **IMPORTANT:** Change "Root Directory"
    - Click "Edit" next to Root Directory
-   - Select `frontend`
+   - Select `ui`
    - Click "Continue"
 5. Framework Preset: **Next.js** (should auto-detect)
 6. **Environment Variables:**
@@ -324,19 +324,19 @@ You should see:
    
    **Value:**
    ```
-   https://whodis-backend.onrender.com
+   https://whodis-api.onrender.com
    ```
-   (Use your actual backend URL from Step 3.4)
+   (Use your actual API URL from Step 3.4)
 
 7. Click "Deploy"
 8. Wait for deployment (~2-3 minutes)
 9. When done, you'll see "🎉" - click "Continue to Dashboard"
-10. **COPY your frontend URL** (looks like `https://whodis-xxxxx.vercel.app`)
+10. **COPY your UI URL** (looks like `https://whodis-ui-xxxxx.vercel.app`)
 
-### Step 4.3: Update CORS in Backend
+### Step 4.3: Update CORS in API
 
 1. Go back to Render dashboard
-2. Click on `whodis-backend` service
+2. Click on `whodis-api` service
 3. Click "Environment" (left menu)
 4. Find `CORS_ORIGINS` variable
 5. Click "Edit" (pencil icon)
@@ -348,7 +348,7 @@ You should see:
 7. Click "Save Changes"
 8. Service will automatically redeploy (wait ~2 minutes)
 
-**✅ Frontend is live!**
+**✅ UI is live!**
 
 ---
 
@@ -449,7 +449,7 @@ Go to your Google Drive:
 **1. No matches found:**
 - Your face might not be in the photos
 - Try with different photos where you're clearly visible
-- Lower the MATCH_THRESHOLD (in backend env vars) to 0.3
+- Lower the MATCH_THRESHOLD (in API env vars) to 0.3
 
 **2. Service account doesn't have access:**
 - Check "WhoDis Results" folder is shared with service account
@@ -472,7 +472,7 @@ Go to your Google Drive:
 ### Problem: Backend errors in Render logs
 
 **Check logs:**
-1. Render dashboard → whodis-backend
+1. Render dashboard → whodis-api
 2. Click "Logs" tab
 3. Look for error messages
 
@@ -497,14 +497,14 @@ Go to your Google Drive:
 
 After successful deployment:
 
-**Render (Backend):**
-- `whodis-backend` - Web service (API)
+**Render (API):**
+- `whodis-api` - Web service (API)
 - `whodis-worker` - Background worker (processes jobs)
 - `whodis-db` - PostgreSQL database
 - `whodis-redis` - Redis queue
 
-**Vercel (Frontend):**
-- `whodis` - Next.js app
+**Vercel (UI):**
+- `whodis-ui` - Next.js app
 
 **Your Drive:**
 - "WhoDis Results" folder (where organized photos go)
@@ -515,24 +515,24 @@ After successful deployment:
 
 ## 🔄 Making Changes
 
-### Update Backend Code
+### Update API Code
 
-1. Make changes to files in `backend/` folder
+1. Make changes to files in `api/` folder
 2. Commit and push:
    ```bash
    git add .
-   git commit -m "Update backend"
+   git commit -m "Update API"
    git push
    ```
 3. Render auto-deploys (takes 3-5 min)
 
-### Update Frontend Code
+### Update UI Code
 
-1. Make changes to files in `frontend/` folder
+1. Make changes to files in `ui/` folder
 2. Commit and push:
    ```bash
    git add .
-   git commit -m "Update frontend"
+   git commit -m "Update UI"
    git push
    ```
 3. Vercel auto-deploys (takes 1-2 min)
@@ -548,10 +548,10 @@ Free tier services sleep after 15 minutes. To keep them awake:
 1. Go to https://cron-job.org
 2. Create free account
 3. Create new cron job:
-   - URL: `https://whodis-backend.onrender.com`
+   - URL: `https://whodis-api.onrender.com`
    - Interval: Every 10 minutes
    - Save
-4. This pings your backend every 10 min to keep it awake
+4. This pings your API every 10 min to keep it awake
 
 ### Method 2: UptimeRobot (Free)
 
@@ -559,7 +559,7 @@ Free tier services sleep after 15 minutes. To keep them awake:
 2. Create free account
 3. Add New Monitor:
    - Type: HTTP(s)
-   - URL: `https://whodis-backend.onrender.com`
+   - URL: `https://whodis-api.onrender.com`
    - Interval: 5 minutes
 4. This monitors and keeps service awake
 
@@ -571,7 +571,7 @@ When you're ready for always-on services:
 
 ### Render Upgrades:
 
-**whodis-backend:** $7/month
+**whodis-api:** $7/month
 - No sleep
 - Always instant response
 - More CPU/RAM
@@ -608,7 +608,7 @@ To upgrade:
 3. Add your domain: `whodis.yourdomain.com`
 4. Follow DNS instructions
 5. SSL is automatic
-6. **Update CORS:** Add new domain to backend CORS_ORIGINS
+6. **Update CORS:** Add new domain to API `CORS_ORIGINS`
 
 ---
 
@@ -627,7 +627,7 @@ Congratulations! You now have:
 
 **Service URLs:**
 - Frontend: `https://whodis-xxxxx.vercel.app`
-- Backend: `https://whodis-backend.onrender.com`
+- API: `https://whodis-api.onrender.com`
 
 **Share it with friends and start organizing photos!** 🎉
 

@@ -29,10 +29,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # FastAPI Backend
-  backend:
+  # FastAPI API
+  api:
     build:
-      context: ./backend
+      context: ./api
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
@@ -42,7 +42,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
-      - ./backend:/app
+      - ./api:/app
       - /tmp/whodis:/tmp/whodis
     depends_on:
       postgres:
@@ -54,7 +54,7 @@ services:
   # Celery Worker
   celery_worker:
     build:
-      context: ./backend
+      context: ./api
       dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/whodis
@@ -62,7 +62,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
-      - ./backend:/app
+      - ./api:/app
       - /tmp/whodis:/tmp/whodis
     depends_on:
       postgres:
@@ -74,7 +74,7 @@ services:
   # Celery Beat (Periodic Tasks)
   celery_beat:
     build:
-      context: ./backend
+      context: ./api
       dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/whodis
@@ -82,7 +82,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
-      - ./backend:/app
+      - ./api:/app
     depends_on:
       - redis
     command: celery -A tasks beat --loglevel=info

@@ -22,7 +22,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS - Allow frontend to call API
+# CORS - Allow the UI to call the API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,  # e.g., ["https://whodis.app", "http://localhost:3000"]
@@ -140,7 +140,7 @@ async def get_job_status(job_id: str):
     """
     Get current job status and progress
     
-    Called by frontend to display progress bar
+    Called by the UI to display progress bar
     """
     db = SessionLocal()
     try:

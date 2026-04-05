@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",  # Next.js dev
-        "https://whodis.app",     # Production frontend
+        "https://whodis.app",     # Production UI
     ]
     
     # Database (PostgreSQL)
