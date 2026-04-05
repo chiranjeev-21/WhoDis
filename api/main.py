@@ -1,26 +1,35 @@
 """
-WhoDis Web Service - FastAPI Backend
+WhoDis Web Service - FastAPI API
 Main application entry point
 """
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr, HttpUrl
+from pydantic import BaseModel, EmailStr
 from typing import Optional
 import uuid
-import base64
 from datetime import datetime
+import logging
 
-from database import SessionLocal, Job, JobStatus
+from database import SessionLocal, Job, JobStatus, init_db
 from tasks import process_job_task
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="WhoDis API",
     description="Face recognition and photo organization service",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Ensure the database schema exists whenever the API boots."""
+    init_db()
+    logger.info("Database initialized")
 
 # CORS - Allow the UI to call the API
 app.add_middleware(
@@ -81,7 +90,7 @@ async def root():
 
 
 @app.post("/api/submit-job", response_model=dict)
-async def submit_job(request: JobSubmitRequest):
+async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTasks):
     """
     Submit a new processing job
     
@@ -89,7 +98,7 @@ async def submit_job(request: JobSubmitRequest):
     1. Validate Drive URL
     2. Save selfie temporarily
     3. Create job in database
-    4. Enqueue Celery task
+    4. Start background processing inside the API service
     5. Return job ID
     """
     try:
@@ -119,13 +128,14 @@ async def submit_job(request: JobSubmitRequest):
             db.add(job)
             db.commit()
             
-            # Enqueue Celery task
-            process_job_task.delay(job_id)
+            # Run the job after the response is sent so users can
+            # immediately transition to the progress screen.
+            background_tasks.add_task(process_job_task, job_id)
             
             return {
                 "job_id": job_id,
-                "status": "queued",
-                "message": "Job created successfully. Processing will begin shortly."
+                "status": "processing",
+                "message": "Job created successfully. Processing has started."
             }
         
         finally:
@@ -222,7 +232,8 @@ async def cancel_job(job_id: str):
         job.completed_at = datetime.utcnow()
         db.commit()
         
-        # TODO: Revoke Celery task if possible
+        # The lightweight deployment runs jobs in-process, so cancellation
+        # only updates the stored job state.
         
         return {"message": "Job cancelled"}
     

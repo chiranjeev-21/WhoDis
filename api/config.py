@@ -1,6 +1,5 @@
 """
-Backend Configuration
-All settings loaded from environment variables
+API configuration loaded from environment variables.
 """
 
 from pydantic_settings import BaseSettings
@@ -26,11 +25,6 @@ class Settings(BaseSettings):
     
     # Database (PostgreSQL)
     DATABASE_URL: str = "postgresql://user:password@localhost:5432/whodis"
-    
-    # Redis (for Celery)
-    REDIS_URL: str = "redis://localhost:6379/0"
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
     
     # Google Drive Service Account
     GOOGLE_SERVICE_ACCOUNT_FILE: str = "service-account.json"

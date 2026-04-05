@@ -1,12 +1,12 @@
 """
-Celery Tasks
-Background job processing
+Background job processing helpers.
+
+Jobs run inside the API service using FastAPI background tasks so the
+deployment can stay on a single low-cost web service.
 """
 
-from celery import Celery
 import os
 import logging
-from pathlib import Path
 
 from config import settings
 from database import update_job_status, JobStatus, log_analytics, SessionLocal, Job
@@ -20,27 +20,9 @@ from google_drive import (
     cleanup_temp_file
 )
 
-# Initialize Celery
-celery_app = Celery(
-    "whodis",
-    broker=settings.CELERY_BROKER_URL,
-    backend=settings.CELERY_RESULT_BACKEND
-)
-
-celery_app.conf.update(
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-    task_time_limit=settings.JOB_TIMEOUT_MINUTES * 60,  # Hard limit
-    task_soft_time_limit=(settings.JOB_TIMEOUT_MINUTES - 2) * 60  # Soft limit
-)
-
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="process_job")
 def process_job_task(job_id: str):
     """
     Main job processing task
@@ -238,30 +220,15 @@ def process_job_task(job_id: str):
         log_analytics('job_failed', job_id=job_id, event_data=error_message)
 
 
-@celery_app.task(name="cleanup_old_results")
 def cleanup_old_results_task():
     """
-    Periodic task to clean up old result folders
-    
-    Schedule with:
-    celery -A tasks beat --loglevel=info
-    
-    Or use celery-beat in production
+    Manual cleanup helper for old result folders.
+
+    Automatic scheduling is intentionally omitted in the lightweight
+    single-service deployment.
     """
     from database import cleanup_old_results
-    
+
     logger.info("Running cleanup of old results...")
     cleanup_old_results(days=settings.AUTO_DELETE_RESULTS_DAYS)
     logger.info("✓ Cleanup complete")
-
-
-# ============================================================================
-# CELERY BEAT SCHEDULE (Periodic Tasks)
-# ============================================================================
-
-celery_app.conf.beat_schedule = {
-    'cleanup-old-results': {
-        'task': 'cleanup_old_results',
-        'schedule': 86400.0,  # Run daily (86400 seconds = 24 hours)
-    },
-}

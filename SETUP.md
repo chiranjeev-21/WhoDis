@@ -10,7 +10,7 @@ A web service where users:
 2. Take a selfie using their camera
 3. Get all photos with their face organized in a new Drive folder
 
-**Tech:** Next.js UI + FastAPI API + Celery workers + InsightFace AI
+**Tech:** Next.js UI + FastAPI API + in-process background jobs + InsightFace AI
 
 **Deployment:** Render (API) + Vercel (UI) = **FREE**
 
@@ -150,19 +150,7 @@ git push -u origin main
 5. **COPY** the "Internal Database URL" (looks like `postgresql://whodis_user:xxxxx@...`)
    - Save this somewhere - you'll need it multiple times!
 
-### Step 3.3: Create Redis
-
-1. Click "New +" → "Redis"
-2. Fill in:
-   - Name: `whodis-redis`
-   - Region: **Same as database**
-   - Plan: **Free**
-3. Click "Create Redis"
-4. Wait for it to create
-5. **COPY** the "Internal Redis URL" (looks like `redis://red-xxxxx:6379`)
-   - Save this too!
-
-### Step 3.4: Create Web Service (API)
+### Step 3.3: Create Web Service (API)
 
 1. Click "New +" → "Web Service"
 2. Click "Build and deploy from a Git repository"
@@ -170,18 +158,10 @@ git push -u origin main
 4. Find your `whodis` repository and click "Connect"
 5. Fill in:
    - **Name:** `whodis-api`
-   - **Region:** Same as database/redis
+   - **Region:** Same as database
    - **Branch:** `main`
    - **Root Directory:** `api`
-   - **Runtime:** `Python 3`
-   - **Build Command:** 
-     ```
-     pip install -r requirements.txt
-     ```
-   - **Start Command:**
-     ```
-     uvicorn main:app --host 0.0.0.0 --port $PORT
-     ```
+   - **Runtime:** `Docker`
    - **Plan:** Free
 
 6. Scroll down to **Environment Variables**
@@ -190,21 +170,6 @@ git push -u origin main
    **DATABASE_URL**
    ```
    <paste your PostgreSQL Internal URL here>
-   ```
-
-   **REDIS_URL**
-   ```
-   <paste your Redis Internal URL here>
-   ```
-
-   **CELERY_BROKER_URL**
-   ```
-   <paste your Redis Internal URL here>
-   ```
-
-   **CELERY_RESULT_BACKEND**
-   ```
-   <paste your Redis Internal URL here>
    ```
 
    **GOOGLE_SERVICE_ACCOUNT_JSON**
@@ -242,44 +207,13 @@ git push -u origin main
 9. Wait for deployment (~5-10 minutes)
 10. When it says "Live", **COPY your API URL** (looks like `https://whodis-api.onrender.com`)
 
-### Step 3.5: Create Background Worker
+### Step 3.4: Database Initialization
 
-1. Click "New +" → "Background Worker"
-2. Click "Build and deploy from a Git repository"
-3. Click "Next"
-4. Find your `whodis` repository and click "Connect"
-5. Fill in:
-   - **Name:** `whodis-worker`
-   - **Region:** Same as others
-   - **Branch:** `main`
-   - **Root Directory:** `api`
-   - **Runtime:** `Python 3`
-   - **Build Command:**
-     ```
-     pip install -r requirements.txt
-     ```
-   - **Start Command:**
-     ```
-     celery -A tasks worker --loglevel=info --concurrency=2
-     ```
-   - **Plan:** Free
+You do **not** need a shell step anymore.
 
-6. **Environment Variables:** Copy ALL the same variables from Step 3.4 (all of them!)
-7. Click "Create Background Worker"
-8. Wait for deployment
+The API now creates database tables automatically on startup, so if the deploy succeeds and the health check passes, the database is ready.
 
-### Step 3.6: Initialize Database
-
-1. Go to your `whodis-api` service (the Web Service)
-2. Click "Shell" tab (in the left menu)
-3. Wait for shell to connect
-4. Type this command and press Enter:
-   ```bash
-   python database.py
-   ```
-5. You should see: "✓ Database tables created"
-
-### Step 3.7: Test API
+### Step 3.5: Test API
 
 Open a new browser tab and go to:
 ```
@@ -433,14 +367,14 @@ Go to your Google Drive:
 
 ### Problem: Processing stuck at "Initializing..."
 
-**Cause:** Worker not running
+**Cause:** The API service hit an error while starting the in-process job
 
 **Solution:**
 1. Go to Render dashboard
-2. Click on `whodis-worker`
-3. Check if it says "Live"
-4. If not, click "Manual Deploy" → "Deploy latest commit"
-5. Check the logs for errors
+2. Click on `whodis-api`
+3. Open the `Logs` tab
+4. Look for errors related to Drive auth, database access, or model loading
+5. Fix the env var or startup error, then redeploy
 
 ### Problem: No photos in results folder
 
@@ -469,7 +403,7 @@ Go to your Google Drive:
 - Refresh the page
 - Try a different browser (Chrome works best)
 
-### Problem: Backend errors in Render logs
+### Problem: API errors in Render logs
 
 **Check logs:**
 1. Render dashboard → whodis-api
@@ -499,9 +433,7 @@ After successful deployment:
 
 **Render (API):**
 - `whodis-api` - Web service (API)
-- `whodis-worker` - Background worker (processes jobs)
 - `whodis-db` - PostgreSQL database
-- `whodis-redis` - Redis queue
 
 **Vercel (UI):**
 - `whodis-ui` - Next.js app
@@ -509,7 +441,7 @@ After successful deployment:
 **Your Drive:**
 - "WhoDis Results" folder (where organized photos go)
 
-**Cost: $0/month** (free tier)
+**Cost:** Lowest-cost setup with one API service and one database
 
 ---
 
@@ -576,20 +508,12 @@ When you're ready for always-on services:
 - Always instant response
 - More CPU/RAM
 
-**whodis-worker:** $7/month
-- Faster processing
-- More concurrent jobs
-
 **whodis-db:** $7/month
 - No 90-day limit
 - Automatic backups
 - More storage
 
-**whodis-redis:** $7/month
-- More memory (256MB)
-- Better performance
-
-**Total:** $28/month for all services always-on
+**Total:** $14/month if you later upgrade both API and database to paid plans
 
 To upgrade:
 1. Go to service dashboard
@@ -618,7 +542,7 @@ Congratulations! You now have:
 
 ✅ AI-powered face recognition service
 ✅ Web interface with camera capture
-✅ Background job processing
+✅ Background job processing inside the API service
 ✅ Google Drive integration
 ✅ Real-time progress updates
 ✅ Automatic result delivery
@@ -644,7 +568,8 @@ Congratulations! You now have:
 - Email notifications
 
 ### Scale Up:
-- Upgrade to paid tier ($28/mo) when you get traffic
+- Upgrade the API/database when you get traffic
+- Add Celery later if you need multiple workers
 - Add monitoring (Sentry for errors)
 - Add analytics (Google Analytics)
 - Optimize database queries

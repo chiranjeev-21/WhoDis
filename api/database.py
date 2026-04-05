@@ -100,7 +100,7 @@ class Analytics(Base):
 def init_db():
     """
     Create all tables
-    Run this once during deployment
+    Safe to call on every API startup
     """
     Base.metadata.create_all(bind=engine)
     print("✓ Database tables created")
