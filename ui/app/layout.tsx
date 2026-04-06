@@ -1,30 +1,29 @@
 import type { Metadata } from 'next';
-import { Manrope, Syne } from 'next/font/google';
+import { Outfit, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 
-const bodyFont = Manrope({
+const bodyFont = Outfit({
   subsets: ['latin'],
   variable: '--font-body',
   display: 'swap',
 });
 
-const displayFont = Syne({
+const displayFont = Space_Grotesk({
   subsets: ['latin'],
-  weight: ['500', '600', '700', '800'],
   variable: '--font-display',
   display: 'swap',
 });
 
 export const metadata: Metadata = {
-  title: 'WhoDis | Your Personal Photo Puller',
-  description: 'Drop a Drive folder, snap a selfie, and instantly surface the photos you actually want to keep.',
+  title: 'WhoDis | Find Your Shots Fast',
+  description: 'Drop a Google Drive folder, take a selfie, and get a clean folder of photos that actually feature you.',
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="en" className={`${bodyFont.variable} ${displayFont.variable}`}>
       <body>{children}</body>
