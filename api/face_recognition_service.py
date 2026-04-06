@@ -3,16 +3,20 @@ Face Recognition Service
 Wraps InsightFace for face detection and matching
 """
 
+import gc
 import numpy as np
 import cv2
 from pathlib import Path
 from insightface.app import FaceAnalysis
 from typing import Optional, List
 import logging
+from threading import Lock
 
 from config import settings
 
 logger = logging.getLogger(__name__)
+_service_instance = None
+_service_lock = Lock()
 
 
 class FaceRecognitionService:
@@ -36,7 +40,8 @@ class FaceRecognitionService:
         
         self.app.prepare(
             ctx_id=0,
-            det_thresh=settings.DETECTION_THRESHOLD
+            det_thresh=settings.DETECTION_THRESHOLD,
+            det_size=(settings.FACE_DETECTION_SIZE, settings.FACE_DETECTION_SIZE)
         )
         
         logger.info(f"✓ InsightFace model loaded: {settings.FACE_MODEL_NAME}")
@@ -49,8 +54,7 @@ class FaceRecognitionService:
             512-d embedding array, or None if no face detected
         """
         try:
-            # Load image
-            img = cv2.imread(selfie_path)
+            img = self._load_image_for_inference(selfie_path)
             if img is None:
                 raise ValueError(f"Failed to load image: {selfie_path}")
             
@@ -77,6 +81,8 @@ class FaceRecognitionService:
         except Exception as e:
             logger.error(f"Failed to extract selfie embedding: {e}")
             return None
+        finally:
+            gc.collect()
     
     def check_image_for_match(self, image_path: Path, query_embedding: np.ndarray,
                               threshold: float = 0.4) -> bool:
@@ -92,8 +98,7 @@ class FaceRecognitionService:
             True if match found, False otherwise
         """
         try:
-            # Load image
-            img = cv2.imread(str(image_path))
+            img = self._load_image_for_inference(image_path)
             if img is None:
                 logger.warning(f"Failed to load image: {image_path}")
                 return False
@@ -120,6 +125,8 @@ class FaceRecognitionService:
         except Exception as e:
             logger.warning(f"Error processing {image_path}: {e}")
             return False
+        finally:
+            gc.collect()
     
     def get_all_matches(self, image_path: Path, query_embedding: np.ndarray,
                        threshold: float = 0.4) -> List[dict]:
@@ -130,7 +137,7 @@ class FaceRecognitionService:
             List of dicts with {bbox, similarity}
         """
         try:
-            img = cv2.imread(str(image_path))
+            img = self._load_image_for_inference(image_path)
             if img is None:
                 return []
             
@@ -152,12 +159,41 @@ class FaceRecognitionService:
         except Exception as e:
             logger.warning(f"Error getting matches from {image_path}: {e}")
             return []
+        finally:
+            gc.collect()
     
     @staticmethod
     def _bbox_area(bbox: np.ndarray) -> float:
         """Calculate bounding box area"""
         x1, y1, x2, y2 = bbox
         return (x2 - x1) * (y2 - y1)
+
+    @staticmethod
+    def _load_image_for_inference(image_path: Path | str) -> Optional[np.ndarray]:
+        """
+        Load and downscale images before face detection to reduce peak memory.
+
+        The free Render instance is memory-constrained, and original phone photos
+        can be much larger than the model needs for accurate matching.
+        """
+        img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+
+        height, width = img.shape[:2]
+        longest_side = max(height, width)
+
+        if longest_side <= settings.MAX_IMAGE_DIMENSION:
+            return img
+
+        scale = settings.MAX_IMAGE_DIMENSION / float(longest_side)
+        resized = cv2.resize(
+            img,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+        del img
+        return resized
     
     @staticmethod
     def compute_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
@@ -168,6 +204,25 @@ class FaceRecognitionService:
             Similarity score between -1 and 1 (higher = more similar)
         """
         return float(np.dot(emb1, emb2))
+
+
+def get_face_recognition_service() -> FaceRecognitionService:
+    """
+    Lazily initialize and reuse the face-recognition model.
+
+    Reusing the model avoids repeated warmup and reduces memory spikes when
+    multiple jobs arrive close together.
+    """
+    global _service_instance
+
+    if _service_instance is not None:
+        return _service_instance
+
+    with _service_lock:
+        if _service_instance is None:
+            _service_instance = FaceRecognitionService()
+
+    return _service_instance
 
 
 # ============================================================================

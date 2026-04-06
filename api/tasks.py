@@ -7,10 +7,12 @@ deployment can stay on a single low-cost web service.
 
 import os
 import logging
+import gc
+from threading import BoundedSemaphore
 
 from config import settings
 from database import update_job_status, JobStatus, log_analytics, SessionLocal, Job
-from face_recognition_service import FaceRecognitionService
+from face_recognition_service import get_face_recognition_service
 from google_drive import (
     list_drive_folder_images,
     download_image_to_temp,
@@ -21,22 +23,16 @@ from google_drive import (
 )
 
 logger = logging.getLogger(__name__)
+_job_slots = BoundedSemaphore(max(1, settings.MAX_CONCURRENT_JOBS))
 
 
-def process_job_task(job_id: str):
-    """
-    Main job processing task
-    
-    Flow:
-    1. Load job from database
-    2. Extract selfie embedding
-    3. Stream images from user's Drive folder
-    4. Find matches
-    5. Copy matches to service Drive folder
-    6. Share folder with user
-    7. Cleanup
-    """
-    
+def is_worker_busy() -> bool:
+    """Return whether the lightweight in-process worker is currently busy."""
+    return _job_slots._value == 0
+
+
+def _run_job(job_id: str):
+    """Run the actual photo-processing workflow."""
     logger.info(f"Starting job {job_id}")
     log_analytics('job_started', job_id=job_id)
     
@@ -46,13 +42,15 @@ def process_job_task(job_id: str):
         
         # Get job from database
         db = SessionLocal()
-        job = db.query(Job).filter(Job.job_id == job_id).first()
-        if not job:
-            raise Exception(f"Job {job_id} not found")
-        db.close()
+        try:
+            job = db.query(Job).filter(Job.job_id == job_id).first()
+            if not job:
+                raise Exception(f"Job {job_id} not found")
+        finally:
+            db.close()
         
-        # Initialize face recognition service
-        face_service = FaceRecognitionService()
+        # Reuse a single loaded face-recognition model to avoid repeated memory spikes.
+        face_service = get_face_recognition_service()
         
         # ====================================================================
         # STEP 1: Process selfie to get query embedding
@@ -103,6 +101,7 @@ def process_job_task(job_id: str):
         for idx, image_file in enumerate(image_files, 1):
             file_id = image_file['id']
             file_name = image_file['name']
+            temp_path = None
             
             try:
                 # Download image to temp
@@ -119,9 +118,6 @@ def process_job_task(job_id: str):
                     matched_file_ids.append(file_id)
                     logger.info(f"Job {job_id}: Match found in {file_name}")
                 
-                # Cleanup temp file
-                cleanup_temp_file(temp_path)
-                
                 processed_count += 1
                 
                 # Update progress
@@ -133,6 +129,16 @@ def process_job_task(job_id: str):
             except Exception as e:
                 logger.warning(f"Job {job_id}: Failed to process {file_name}: {e}")
                 # Continue with next image
+            finally:
+                if temp_path is not None:
+                    try:
+                        cleanup_temp_file(temp_path)
+                    except Exception as cleanup_error:
+                        logger.warning(f"Job {job_id}: Failed to cleanup temp file {temp_path}: {cleanup_error}")
+
+                # Explicit collection keeps the lightweight Render instance more stable.
+                if idx % 10 == 0:
+                    gc.collect()
         
         matched_count = len(matched_file_ids)
         logger.info(f"Job {job_id}: Found {matched_count} matches out of {total_images} images")
@@ -218,6 +224,38 @@ def process_job_task(job_id: str):
                          current_message=f"Error: {error_message}")
         
         log_analytics('job_failed', job_id=job_id, event_data=error_message)
+    finally:
+        gc.collect()
+
+
+def process_job_task(job_id: str):
+    """
+    Main job processing task
+    
+    Flow:
+    1. Load job from database
+    2. Extract selfie embedding
+    3. Stream images from user's Drive folder
+    4. Find matches
+    5. Copy matches to service Drive folder
+    6. Share folder with user
+    7. Cleanup
+    """
+    
+    if not _job_slots.acquire(blocking=False):
+        update_job_status(
+            job_id,
+            JobStatus.PENDING,
+            progress=0,
+            current_message="Queued. Another scan is already running on this worker..."
+        )
+        logger.info("Job %s is waiting for an available worker slot", job_id)
+        _job_slots.acquire()
+
+    try:
+        _run_job(job_id)
+    finally:
+        _job_slots.release()
 
 
 def cleanup_old_results_task():

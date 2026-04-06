@@ -3,7 +3,7 @@ API configuration loaded from environment variables.
 """
 
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         "http://localhost:3000",  # Next.js dev
         "https://whodis.app",     # Production UI
     ]
+    CORS_ORIGIN_REGEX: Optional[str] = r"https://.*\.vercel\.app"
     
     # Database (PostgreSQL)
     DATABASE_URL: str = "postgresql://user:password@localhost:5432/whodis"
@@ -35,10 +36,13 @@ class Settings(BaseSettings):
     DETECTION_THRESHOLD: float = 0.5
     MATCH_THRESHOLD: float = 0.4
     EMBEDDING_DIM: int = 512
+    FACE_DETECTION_SIZE: int = 640
+    MAX_IMAGE_DIMENSION: int = 1600
     
     # Job Settings
-    MAX_IMAGES_PER_JOB: int = 500  # Limit to prevent abuse
+    MAX_IMAGES_PER_JOB: int = 200  # Limit to prevent abuse and memory spikes
     JOB_TIMEOUT_MINUTES: int = 30  # Max time for a job
+    MAX_CONCURRENT_JOBS: int = 1  # Lightweight Render deployment processes one scan at a time
     
     # Cleanup
     AUTO_DELETE_RESULTS_DAYS: int = 7  # Delete result folders after N days

@@ -13,7 +13,7 @@ from datetime import datetime
 import logging
 
 from database import SessionLocal, Job, JobStatus, init_db
-from tasks import process_job_task
+from tasks import process_job_task, is_worker_busy
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ async def startup_event():
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,  # e.g., ["https://whodis.app", "http://localhost:3000"]
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -113,6 +114,8 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
         # Save selfie to temp storage (S3/local)
         selfie_path = await save_selfie_temp(job_id, request.selfie_base64)
         
+        worker_busy = is_worker_busy()
+
         # Create job record in database
         db = SessionLocal()
         try:
@@ -123,7 +126,8 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
                 selfie_path=selfie_path,
                 user_email=request.user_email,
                 status=JobStatus.PENDING,
-                progress=0
+                progress=0,
+                current_message="Queued. Waiting for an available worker..." if worker_busy else "Queued. Starting soon..."
             )
             db.add(job)
             db.commit()
@@ -134,8 +138,8 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
             
             return {
                 "job_id": job_id,
-                "status": "processing",
-                "message": "Job created successfully. Processing has started."
+                "status": "queued" if worker_busy else "processing",
+                "message": "Job created successfully. Processing has started." if not worker_busy else "Job created successfully. It has been queued and will start soon."
             }
         
         finally:

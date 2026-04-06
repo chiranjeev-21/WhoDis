@@ -56,11 +56,13 @@ export default function ProcessPage() {
     let redirectTimeout: ReturnType<typeof setTimeout> | undefined;
     let hasScheduledRedirect = false;
     let interval: ReturnType<typeof setInterval>;
+    let consecutiveFailures = 0;
 
     const pollStatus = async () => {
       try {
         const response = await axios.get(`${API_URL}/api/job-status/${jobId}`);
         const status = response.data as JobStatus;
+        consecutiveFailures = 0;
 
         setJobStatus(status);
 
@@ -77,8 +79,16 @@ export default function ProcessPage() {
           setError(status.error_message || 'Processing failed.');
         }
       } catch (err: any) {
-        clearInterval(interval);
-        setError(err.response?.data?.detail || 'Failed to fetch job status.');
+        consecutiveFailures += 1;
+
+        if (consecutiveFailures >= 5) {
+          clearInterval(interval);
+          setError(
+            err.response?.status === 502
+              ? 'The API worker restarted while processing. Please try again in a moment.'
+              : err.response?.data?.detail || 'Failed to fetch job status.'
+          );
+        }
       }
     };
 
