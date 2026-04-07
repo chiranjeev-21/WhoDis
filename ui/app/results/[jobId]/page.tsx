@@ -35,6 +35,7 @@ export default function ResultsPage() {
   const [zipMessage, setZipMessage] = useState('');
   const [zipError, setZipError] = useState('');
   const [shouldAutoDownloadZip, setShouldAutoDownloadZip] = useState(false);
+  const [zipDownloading, setZipDownloading] = useState(false);
 
   const fetchResults = async () => {
     if (!jobId) {
@@ -88,13 +89,53 @@ export default function ResultsPage() {
     }
   };
 
-  const triggerZipDownload = () => {
-    const link = document.createElement('a');
-    link.href = `${API_URL}/api/results/${jobId}/download?ts=${Date.now()}`;
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+  const downloadPreparedZip = async () => {
+    if (!jobId) {
+      return false;
+    }
+
+    setZipDownloading(true);
+
+    try {
+      const response = await axios.get(`${API_URL}/api/results/${jobId}/download`, {
+        responseType: 'blob',
+        params: { ts: Date.now() },
+      });
+
+      const blob = new Blob([response.data], { type: 'application/zip' });
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `whodis-${jobId.slice(0, 8)}-matches.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+
+      setZipError('');
+      setZipMessage('ZIP downloaded.');
+      return true;
+    } catch (err: any) {
+      const blob = err?.response?.data;
+      let detail = 'Failed to download ZIP.';
+
+      if (blob instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await blob.text());
+          detail = parsed.detail || parsed.error || detail;
+        } catch {
+          detail = 'Failed to download ZIP.';
+        }
+      } else {
+        detail = err.response?.data?.detail || detail;
+      }
+
+      setZipError(detail);
+      setZipMessage('');
+      return false;
+    } finally {
+      setZipDownloading(false);
+    }
   };
 
   const handleZipAction = async () => {
@@ -105,8 +146,8 @@ export default function ResultsPage() {
     setZipError('');
 
     if (result.zip_status === 'ready') {
-      setZipMessage('Your ZIP download should start shortly.');
-      triggerZipDownload();
+      setZipMessage('Starting ZIP download...');
+      await downloadPreparedZip();
       return;
     }
 
@@ -128,9 +169,11 @@ export default function ResultsPage() {
       );
 
       if (nextStatus === 'ready') {
-        triggerZipDownload();
+        const downloaded = await downloadPreparedZip();
         setShouldAutoDownloadZip(false);
-        setZipMessage('Your ZIP download should start shortly.');
+        if (!downloaded) {
+          await fetchResults();
+        }
       }
     } catch (err: any) {
       setShouldAutoDownloadZip(false);
@@ -145,10 +188,16 @@ export default function ResultsPage() {
     }
 
     if (result.zip_status === 'ready' && shouldAutoDownloadZip) {
-      triggerZipDownload();
-      setShouldAutoDownloadZip(false);
-      setZipError('');
-      setZipMessage('Your ZIP download should start shortly.');
+      downloadPreparedZip().then((downloaded) => {
+        if (downloaded) {
+          setShouldAutoDownloadZip(false);
+          setZipError('');
+          return;
+        }
+
+        setShouldAutoDownloadZip(false);
+        fetchResults();
+      });
       return;
     }
 
@@ -253,7 +302,9 @@ export default function ResultsPage() {
     { label: 'Job tag', value: result.job_id.slice(0, 8).toUpperCase() },
   ];
   const zipButtonLabel =
-    result.zip_status === 'ready'
+    zipDownloading
+      ? 'Downloading ZIP...'
+      : result.zip_status === 'ready'
       ? 'Download ZIP'
       : result.zip_status === 'processing'
         ? 'Preparing ZIP...'
@@ -326,7 +377,7 @@ export default function ResultsPage() {
                     <button
                       type="button"
                       onClick={handleZipAction}
-                      disabled={result.zip_status === 'processing'}
+                      disabled={result.zip_status === 'processing' || zipDownloading}
                       className="ghost-button px-6 py-4 text-center text-sm uppercase tracking-[0.16em]"
                     >
                       {zipButtonLabel}
