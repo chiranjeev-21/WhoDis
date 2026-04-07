@@ -17,7 +17,7 @@ import logging
 from database import SessionLocal, Job, JobStatus, init_db, update_job_fields
 from tasks import process_job_task, prepare_zip_task, is_worker_busy
 from config import settings
-from social_studio_service import analyze_zip_for_platform, list_platforms, SocialStudioError
+from social_studio_platforms import list_platforms
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,8 @@ async def analyze_social_studio_zip(
     zip_file: UploadFile = File(...),
 ):
     """Analyze a ZIP archive and generate platform-specific social suggestions."""
+    from social_studio_service import analyze_zip_for_platform, SocialStudioError
+
     if not zip_file.filename or not zip_file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Upload a ZIP file containing images.")
 

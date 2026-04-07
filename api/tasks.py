@@ -14,13 +14,6 @@ from datetime import datetime
 
 from config import settings
 from database import update_job_status, update_job_fields, JobStatus, log_analytics, SessionLocal, Job
-from face_recognition_service import get_face_recognition_service
-from google_drive import (
-    list_drive_folder_images,
-    download_image_to_temp,
-    cleanup_temp_file,
-    build_results_zip,
-)
 
 logger = logging.getLogger(__name__)
 _job_slots = BoundedSemaphore(max(1, settings.MAX_CONCURRENT_JOBS))
@@ -50,6 +43,9 @@ def _run_job(job_id: str):
             db.close()
         
         # Reuse a single loaded face-recognition model to avoid repeated memory spikes.
+        from face_recognition_service import get_face_recognition_service
+        from google_drive import list_drive_folder_images, download_image_to_temp, cleanup_temp_file
+
         face_service = get_face_recognition_service()
         
         # ====================================================================
@@ -294,6 +290,8 @@ def prepare_zip_task(job_id: str):
     )
 
     try:
+        from google_drive import build_results_zip
+
         matched_files = json.loads(job.matched_files_json)
         archive_path = build_results_zip(matched_files, archive_name_prefix=f"whodis_{job_id[:8]}")
         update_job_fields(

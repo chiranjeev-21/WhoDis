@@ -24,7 +24,7 @@ import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from config import settings
-from face_recognition_service import get_face_recognition_service
+from social_studio_platforms import PLATFORM_DEFINITIONS, PlatformDefinition, list_platforms
 
 try:
     from huggingface_hub import InferenceClient
@@ -34,18 +34,6 @@ except ImportError:  # pragma: no cover - optional dependency for local fallback
 logger = logging.getLogger(__name__)
 
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
-
-
-@dataclass(frozen=True)
-class PlatformDefinition:
-    key: str
-    label: str
-    description: str
-    narrative: str
-    primary_copy_label: str
-    secondary_copy_label: str
-    suggestion_target: int
-    card_noun: str
 
 
 @dataclass
@@ -63,58 +51,8 @@ class ImageAsset:
     largest_face_ratio: float
     caption: str = ""
 
-
-PLATFORM_DEFINITIONS = {
-    "instagram": PlatformDefinition(
-        key="instagram",
-        label="Instagram",
-        description="Build polished carousels and a caption that feels intentional.",
-        narrative="curate image groups that feel cohesive in an Instagram post or carousel",
-        primary_copy_label="Caption",
-        secondary_copy_label="Carousel Hook",
-        suggestion_target=3,
-        card_noun="Post Set",
-    ),
-    "snapchat": PlatformDefinition(
-        key="snapchat",
-        label="Snapchat",
-        description="Pick punchy story-ready images with overlay text that lands fast.",
-        narrative="pick bright, immediate story moments that feel natural on Snapchat",
-        primary_copy_label="Story Script",
-        secondary_copy_label="Overlay Text",
-        suggestion_target=3,
-        card_noun="Story Flow",
-    ),
-    "tinder": PlatformDefinition(
-        key="tinder",
-        label="Tinder",
-        description="Suggest dating-profile picks, ordering, and funny openers.",
-        narrative="build a strong dating-profile mix with clear, attractive, and playful images",
-        primary_copy_label="Profile Angle",
-        secondary_copy_label="Funny Punchline",
-        suggestion_target=3,
-        card_noun="Dating Pick",
-    ),
-}
-
-
 class SocialStudioError(Exception):
     """Raised when social-studio analysis cannot continue."""
-
-
-def list_platforms() -> list[dict]:
-    """Return UI-friendly platform metadata."""
-    return [
-        {
-            "key": platform.key,
-            "label": platform.label,
-            "description": platform.description,
-            "primary_copy_label": platform.primary_copy_label,
-            "secondary_copy_label": platform.secondary_copy_label,
-            "card_noun": platform.card_noun,
-        }
-        for platform in PLATFORM_DEFINITIONS.values()
-    ]
 
 
 def analyze_zip_for_platform(zip_bytes: bytes, platform_key: str, upload_name: str = "matches.zip") -> dict:
@@ -861,6 +799,8 @@ def _dedupe_display_name(file_name: str, used_names: dict[str, int]) -> str:
 def _get_face_service_safe():
     """Load the face model only when possible, but do not block the feature on it."""
     try:
+        from face_recognition_service import get_face_recognition_service
+
         return get_face_recognition_service()
     except Exception as e:
         logger.warning("Social studio could not initialize face analysis: %s", e)
