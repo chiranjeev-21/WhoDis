@@ -2,12 +2,18 @@
 API configuration loaded from environment variables.
 """
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
 
 class Settings(BaseSettings):
     """Application settings"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore",
+    )
     
     # Application
     APP_NAME: str = "WhoDis"
@@ -68,10 +74,7 @@ class Settings(BaseSettings):
     HF_TOKEN: str = ""
     HF_VISION_MODEL: str = "Qwen/Qwen2.5-VL-3B-Instruct"
     HF_TEXT_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    HF_IMAGE_CAPTION_MODEL: str = ""  # Deprecated legacy key kept for backwards compatibility.
 
 
 # Global settings instance
