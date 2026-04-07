@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     
     # Rate Limiting
     MAX_JOBS_PER_IP_PER_DAY: int = 10
+
+    # Social Studio
+    SOCIAL_STUDIO_IMAGE_LIMIT: int = 24
+    SOCIAL_STUDIO_AI_IMAGE_LIMIT: int = 8
+    SOCIAL_STUDIO_MAX_ZIP_MB: int = 150
+    HF_TOKEN: str = ""
+    HF_VISION_MODEL: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    HF_TEXT_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
     
     class Config:
         env_file = ".env"

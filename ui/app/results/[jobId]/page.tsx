@@ -333,18 +333,25 @@ export default function ResultsPage() {
                     </button>
                   )}
                   <button
+                    onClick={() => router.push('/social-studio')}
+                    className="ghost-button px-6 py-4 text-sm uppercase tracking-[0.16em]"
+                  >
+                    Social studio
+                  </button>
+                  <button
                     onClick={copyFolderLink}
                     className="ghost-button px-6 py-4 text-sm uppercase tracking-[0.16em]"
                   >
                     {copied ? 'Link copied' : 'Copy Drive link'}
                   </button>
-                  <button
-                    onClick={() => router.push('/')}
-                    className="ghost-button px-6 py-4 text-sm uppercase tracking-[0.16em]"
-                  >
-                    Run another scan
-                  </button>
                 </div>
+
+                <button
+                  onClick={() => router.push('/')}
+                  className="ghost-button px-6 py-4 text-sm uppercase tracking-[0.16em]"
+                >
+                  Run another scan
+                </button>
 
                 {(zipMessage || zipError) && (
                   <div

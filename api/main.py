@@ -3,7 +3,7 @@ WhoDis Web Service - FastAPI API
 Main application entry point
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, EmailStr
@@ -17,6 +17,7 @@ import logging
 from database import SessionLocal, Job, JobStatus, init_db, update_job_fields
 from tasks import process_job_task, prepare_zip_task, is_worker_busy
 from config import settings
+from social_studio_service import analyze_zip_for_platform, list_platforms, SocialStudioError
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,41 @@ async def root():
         "status": "running",
         "version": "1.0.0"
     }
+
+
+@app.get("/api/social-studio/platforms", response_model=dict)
+async def get_social_studio_platforms():
+    """Return available social-studio platform configurations."""
+    return {"platforms": list_platforms()}
+
+
+@app.post("/api/social-studio/analyze", response_model=dict)
+async def analyze_social_studio_zip(
+    platform: str = Form(...),
+    zip_file: UploadFile = File(...),
+):
+    """Analyze a ZIP archive and generate platform-specific social suggestions."""
+    if not zip_file.filename or not zip_file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Upload a ZIP file containing images.")
+
+    try:
+        zip_bytes = await zip_file.read()
+        if not zip_bytes:
+            raise HTTPException(status_code=400, detail="The uploaded ZIP file was empty.")
+
+        result = analyze_zip_for_platform(
+            zip_bytes=zip_bytes,
+            platform_key=platform,
+            upload_name=zip_file.filename,
+        )
+        return result
+    except SocialStudioError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Social studio analysis failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to analyze the uploaded ZIP.") from e
 
 
 @app.post("/api/submit-job", response_model=dict)
