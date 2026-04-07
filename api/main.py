@@ -5,15 +5,17 @@ Main application entry point
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 import uuid
+import json
+import os
 from datetime import datetime
 import logging
 
-from database import SessionLocal, Job, JobStatus, init_db
-from tasks import process_job_task, is_worker_busy
+from database import SessionLocal, Job, JobStatus, init_db, update_job_fields
+from tasks import process_job_task, prepare_zip_task, is_worker_busy
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -73,7 +75,18 @@ class JobResultResponse(BaseModel):
     status: str
     matched_images: int
     folder_url: str
+    result_mode: str
     preview_urls: list[str]  # First 10 image thumbnails
+    matched_files: list[dict]
+    zip_status: str = "idle"
+    zip_error_message: Optional[str] = None
+
+
+class ZipPreparationResponse(BaseModel):
+    """Response for ZIP archive preparation requests."""
+    job_id: str
+    zip_status: str
+    detail: str
 
 
 # ============================================================================
@@ -200,17 +213,119 @@ async def get_job_results(job_id: str):
         if job.status != JobStatus.COMPLETED:
             raise HTTPException(status_code=400, detail=f"Job status is {job.status.value}, not completed")
         
-        # Get preview thumbnails from Drive (first 10 images)
-        preview_urls = get_folder_preview_urls(job.result_folder_id, limit=10)
+        matched_files = []
+        result_mode = "drive_folder"
+        folder_url = job.result_folder_url or ""
+        preview_urls = []
+        zip_status, zip_error_message = normalize_zip_state(job)
+
+        if job.matched_files_json:
+            result_mode = "source_links"
+            folder_url = job.drive_folder_url
+
+            stored_matches = json.loads(job.matched_files_json)
+            matched_files = get_matched_file_results(stored_matches)
+            preview_urls = [
+                file["thumbnail_url"]
+                for file in matched_files
+                if file.get("thumbnail_url")
+            ][:10]
+        elif job.result_folder_id:
+            preview_urls = get_folder_preview_urls(job.result_folder_id, limit=10)
         
         return JobResultResponse(
             job_id=job.job_id,
             status=job.status.value,
             matched_images=job.matched_images or 0,
-            folder_url=job.result_folder_url or "",
-            preview_urls=preview_urls
+            folder_url=folder_url,
+            result_mode=result_mode,
+            preview_urls=preview_urls,
+            matched_files=matched_files,
+            zip_status=zip_status,
+            zip_error_message=zip_error_message,
         )
     
+    finally:
+        db.close()
+
+
+@app.post("/api/results/{job_id}/prepare-download", response_model=ZipPreparationResponse)
+async def prepare_job_results_download(job_id: str, background_tasks: BackgroundTasks):
+    """Start background ZIP generation for a completed job."""
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == job_id).first()
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        if job.status != JobStatus.COMPLETED:
+            raise HTTPException(status_code=400, detail=f"Job status is {job.status.value}, not completed")
+
+        if not job.matched_files_json:
+            raise HTTPException(status_code=400, detail="ZIP download is only available for source-link results.")
+
+        zip_status, zip_error_message = normalize_zip_state(job)
+
+        if zip_status == "ready":
+            return ZipPreparationResponse(
+                job_id=job.job_id,
+                zip_status="ready",
+                detail="ZIP archive is ready to download.",
+            )
+
+        if zip_status != "processing":
+            update_job_fields(
+                job_id,
+                zip_status="processing",
+                zip_error_message=None,
+                zip_path=None,
+                zip_generated_at=None,
+            )
+            background_tasks.add_task(prepare_zip_task, job_id)
+            zip_status = "processing"
+
+        detail = "Preparing your ZIP archive now."
+        if zip_error_message:
+            detail = f"Retrying ZIP generation after the previous error: {zip_error_message}"
+
+        return ZipPreparationResponse(
+            job_id=job.job_id,
+            zip_status=zip_status,
+            detail=detail,
+        )
+    finally:
+        db.close()
+
+
+@app.get("/api/results/{job_id}/download")
+async def download_job_results(job_id: str):
+    """Download a prepared ZIP archive for a completed job."""
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == job_id).first()
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        if job.status != JobStatus.COMPLETED:
+            raise HTTPException(status_code=400, detail=f"Job status is {job.status.value}, not completed")
+
+        if not job.matched_files_json:
+            raise HTTPException(status_code=400, detail="ZIP download is only available for source-link results.")
+
+        zip_status, zip_error_message = normalize_zip_state(job)
+        if zip_status != "ready" or not job.zip_path:
+            raise HTTPException(
+                status_code=409,
+                detail=zip_error_message or "ZIP archive is still being prepared. Try again in a moment.",
+            )
+
+        return FileResponse(
+            path=job.zip_path,
+            media_type="application/zip",
+            filename=f"whodis-{job_id[:8]}-matches.zip",
+        )
     finally:
         db.close()
 
@@ -323,6 +438,41 @@ def get_folder_preview_urls(folder_id: str, limit: int = 10) -> list[str]:
     except Exception as e:
         print(f"Failed to get preview URLs: {e}")
         return []
+
+
+def get_matched_file_results(stored_matches: list[dict]) -> list[dict]:
+    """Enrich stored source-file ids with display metadata for the results page."""
+    from google_drive import get_files_result_data
+
+    file_ids = [item["file_id"] for item in stored_matches if item.get("file_id")]
+    file_names_by_id = {
+        item["file_id"]: item.get("name", "Matched photo")
+        for item in stored_matches
+        if item.get("file_id")
+    }
+
+    return get_files_result_data(file_ids, file_names_by_id=file_names_by_id)
+
+
+def normalize_zip_state(job: Job) -> tuple[str, Optional[str]]:
+    """
+    Return a sane ZIP status for the job, resetting stale cached paths when needed.
+    """
+    zip_status = job.zip_status or "idle"
+    zip_error_message = job.zip_error_message
+
+    if zip_status == "ready" and (not job.zip_path or not os.path.exists(job.zip_path)):
+        update_job_fields(
+            job.job_id,
+            zip_status="idle",
+            zip_path=None,
+            zip_error_message=None,
+            zip_generated_at=None,
+        )
+        zip_status = "idle"
+        zip_error_message = None
+
+    return zip_status, zip_error_message
 
 
 # ============================================================================

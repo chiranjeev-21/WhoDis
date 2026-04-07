@@ -8,18 +8,18 @@ deployment can stay on a single low-cost web service.
 import os
 import logging
 import gc
+import json
 from threading import BoundedSemaphore
+from datetime import datetime
 
 from config import settings
-from database import update_job_status, JobStatus, log_analytics, SessionLocal, Job
+from database import update_job_status, update_job_fields, JobStatus, log_analytics, SessionLocal, Job
 from face_recognition_service import get_face_recognition_service
 from google_drive import (
     list_drive_folder_images,
     download_image_to_temp,
-    create_result_folder,
-    copy_files_to_folder,
-    share_folder_with_email,
-    cleanup_temp_file
+    cleanup_temp_file,
+    build_results_zip,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ def _run_job(job_id: str):
         # STEP 3: Process each image and find matches
         # ====================================================================
         
-        matched_file_ids = []
+        matched_files = []
         processed_count = 0
         
         for idx, image_file in enumerate(image_files, 1):
@@ -115,7 +115,10 @@ def _run_job(job_id: str):
                 )
                 
                 if is_match:
-                    matched_file_ids.append(file_id)
+                    matched_files.append({
+                        "file_id": file_id,
+                        "name": file_name,
+                    })
                     logger.info(f"Job {job_id}: Match found in {file_name}")
                 
                 processed_count += 1
@@ -124,7 +127,7 @@ def _run_job(job_id: str):
                 progress = 15 + int((processed_count / total_images) * 70)  # 15% to 85%
                 update_job_status(job_id, JobStatus.PROCESSING,
                                 progress=progress,
-                                current_message=f"Processing image {processed_count}/{total_images}... ({len(matched_file_ids)} matches so far)")
+                                current_message=f"Processing image {processed_count}/{total_images}... ({len(matched_files)} matches so far)")
             
             except Exception as e:
                 logger.warning(f"Job {job_id}: Failed to process {file_name}: {e}")
@@ -140,7 +143,7 @@ def _run_job(job_id: str):
                 if idx % 10 == 0:
                     gc.collect()
         
-        matched_count = len(matched_file_ids)
+        matched_count = len(matched_files)
         logger.info(f"Job {job_id}: Found {matched_count} matches out of {total_images} images")
         
         if matched_count == 0:
@@ -148,47 +151,27 @@ def _run_job(job_id: str):
             update_job_status(job_id, JobStatus.COMPLETED,
                             progress=100,
                             matched_images=0,
+                            zip_status="idle",
+                            zip_path=None,
+                            zip_error_message=None,
+                            zip_generated_at=None,
                             current_message="No matches found. Try a different selfie or check your Drive folder.")
             log_analytics('job_completed_no_matches', job_id=job_id)
             return
         
         # ====================================================================
-        # STEP 4: Create result folder in service Drive
+        # STEP 4: Persist matched source-file links
         # ====================================================================
-        
+
         update_job_status(job_id, JobStatus.PROCESSING,
-                         progress=90,
+                         progress=92,
                          matched_images=matched_count,
-                         current_message=f"Creating your folder with {matched_count} photos...")
-        
-        result_folder = create_result_folder(job_id)
-        result_folder_id = result_folder['id']
-        result_folder_url = result_folder['webViewLink']
-        
-        logger.info(f"Job {job_id}: Created result folder {result_folder_id}")
-        
+                         current_message="Preparing result links...")
+
+        matched_files_json = json.dumps(matched_files)
+
         # ====================================================================
-        # STEP 5: Copy matched files to result folder
-        # ====================================================================
-        
-        update_job_status(job_id, JobStatus.PROCESSING,
-                         progress=95,
-                         current_message="Copying your photos...")
-        
-        copy_files_to_folder(matched_file_ids, result_folder_id)
-        
-        logger.info(f"Job {job_id}: Copied {matched_count} files to result folder")
-        
-        # ====================================================================
-        # STEP 6: Share folder with user (if email provided)
-        # ====================================================================
-        
-        if job.user_email:
-            share_folder_with_email(result_folder_id, job.user_email)
-            logger.info(f"Job {job_id}: Shared folder with {job.user_email}")
-        
-        # ====================================================================
-        # STEP 7: Cleanup selfie (if configured)
+        # STEP 5: Cleanup selfie (if configured)
         # ====================================================================
         
         if settings.DELETE_SELFIE_AFTER_PROCESSING:
@@ -199,14 +182,18 @@ def _run_job(job_id: str):
                 logger.warning(f"Job {job_id}: Failed to delete selfie: {e}")
         
         # ====================================================================
-        # STEP 8: Mark job as completed
+        # STEP 6: Mark job as completed
         # ====================================================================
         
         update_job_status(job_id, JobStatus.COMPLETED,
                          progress=100,
                          matched_images=matched_count,
-                         result_folder_id=result_folder_id,
-                         result_folder_url=result_folder_url,
+                         result_folder_url=job.drive_folder_url,
+                         matched_files_json=matched_files_json,
+                         zip_status="idle",
+                         zip_path=None,
+                         zip_error_message=None,
+                         zip_generated_at=None,
                          current_message=f"✓ Complete! Found {matched_count} photos with you.")
         
         log_analytics('job_completed', job_id=job_id, 
@@ -237,9 +224,8 @@ def process_job_task(job_id: str):
     2. Extract selfie embedding
     3. Stream images from user's Drive folder
     4. Find matches
-    5. Copy matches to service Drive folder
-    6. Share folder with user
-    7. Cleanup
+    5. Persist matched source-file ids
+    6. Cleanup
     """
     
     if not _job_slots.acquire(blocking=False):
@@ -270,3 +256,60 @@ def cleanup_old_results_task():
     logger.info("Running cleanup of old results...")
     cleanup_old_results(days=settings.AUTO_DELETE_RESULTS_DAYS)
     logger.info("✓ Cleanup complete")
+
+
+def prepare_zip_task(job_id: str):
+    """Build and cache a ZIP archive for a completed job's matched files."""
+    logger.info("Preparing ZIP archive for job %s", job_id)
+
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == job_id).first()
+        if not job:
+            logger.warning("Cannot prepare ZIP for missing job %s", job_id)
+            return
+
+        if job.status != JobStatus.COMPLETED or not job.matched_files_json:
+            update_job_fields(
+                job_id,
+                zip_status="failed",
+                zip_error_message="ZIP download is only available after a completed run with matches.",
+                zip_path=None,
+                zip_generated_at=None,
+            )
+            return
+
+        if job.zip_status == "ready" and job.zip_path and os.path.exists(job.zip_path):
+            logger.info("Reusing cached ZIP for job %s", job_id)
+            return
+    finally:
+        db.close()
+
+    update_job_fields(
+        job_id,
+        zip_status="processing",
+        zip_error_message=None,
+        zip_path=None,
+        zip_generated_at=None,
+    )
+
+    try:
+        matched_files = json.loads(job.matched_files_json)
+        archive_path = build_results_zip(matched_files, archive_name_prefix=f"whodis_{job_id[:8]}")
+        update_job_fields(
+            job_id,
+            zip_status="ready",
+            zip_error_message=None,
+            zip_path=str(archive_path),
+            zip_generated_at=datetime.utcnow(),
+        )
+        logger.info("ZIP archive ready for job %s", job_id)
+    except Exception as e:
+        logger.error("ZIP archive generation failed for job %s: %s", job_id, e, exc_info=True)
+        update_job_fields(
+            job_id,
+            zip_status="failed",
+            zip_error_message=str(e),
+            zip_path=None,
+            zip_generated_at=None,
+        )

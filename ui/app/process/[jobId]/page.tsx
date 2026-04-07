@@ -27,13 +27,13 @@ const statusMeta = {
   processing: {
     label: 'Scanning',
     title: 'Matching your face across the album',
-    copy: 'WhoDis is scanning every image, comparing embeddings, and building your keepers folder.',
+    copy: 'WhoDis is scanning every image, comparing embeddings, and preparing your matched results.',
     accent: '#20c997',
   },
   completed: {
     label: 'Completed',
     title: 'Your results are ready',
-    copy: 'The folder is finished. We are sending you to the results view now.',
+    copy: 'The matches are ready. We are sending you to the results view now.',
     accent: '#8b5cf6',
   },
 } as const;

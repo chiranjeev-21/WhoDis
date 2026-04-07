@@ -5,5 +5,11 @@ __pycache__/
 
 node_modules/
 .next/
+ui/tsconfig.tsbuildinfo
 
 .DS_Store
+
+# Local secrets
+api/service-account.json
+api/client_secret*.json
+api/whodis-*.json

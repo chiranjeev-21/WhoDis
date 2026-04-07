@@ -11,14 +11,17 @@ interface JobResult {
   status: string;
   matched_images: number;
   folder_url: string;
+  result_mode: string;
   preview_urls: string[];
+  zip_status: string;
+  zip_error_message?: string | null;
+  matched_files: {
+    file_id: string;
+    name: string;
+    view_url: string;
+    thumbnail_url?: string | null;
+  }[];
 }
-
-const notes = [
-  'Open the result folder directly in Google Drive and download the keepers.',
-  'The source folder stays untouched. WhoDis creates a separate curated output.',
-  'If the hit rate feels low, rerun with a cleaner selfie in brighter light.',
-];
 
 export default function ResultsPage() {
   const router = useRouter();
@@ -29,25 +32,44 @@ export default function ResultsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [zipMessage, setZipMessage] = useState('');
+  const [zipError, setZipError] = useState('');
+  const [shouldAutoDownloadZip, setShouldAutoDownloadZip] = useState(false);
+
+  const fetchResults = async () => {
+    if (!jobId) {
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_URL}/api/results/${jobId}`);
+      setResult(response.data);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to fetch results.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!jobId) {
       return;
     }
 
-    const fetchResults = async () => {
-      try {
-        const response = await axios.get(`${API_URL}/api/results/${jobId}`);
-        setResult(response.data);
-      } catch (err: any) {
-        setError(err.response?.data?.detail || 'Failed to fetch results.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchResults();
   }, [jobId]);
+
+  useEffect(() => {
+    if (result?.zip_status !== 'processing') {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      fetchResults();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [result?.zip_status, jobId]);
 
   const copyFolderLink = async () => {
     if (!result?.folder_url) {
@@ -65,6 +87,87 @@ export default function ResultsPage() {
       setCopied(false);
     }
   };
+
+  const triggerZipDownload = () => {
+    const link = document.createElement('a');
+    link.href = `${API_URL}/api/results/${jobId}/download?ts=${Date.now()}`;
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleZipAction = async () => {
+    if (!result || !jobId) {
+      return;
+    }
+
+    setZipError('');
+
+    if (result.zip_status === 'ready') {
+      setZipMessage('Your ZIP download should start shortly.');
+      triggerZipDownload();
+      return;
+    }
+
+    setShouldAutoDownloadZip(true);
+    setZipMessage('Preparing your ZIP. Leave this tab open and we will start the download as soon as it is ready.');
+
+    try {
+      const response = await axios.post(`${API_URL}/api/results/${jobId}/prepare-download`);
+      const nextStatus = response.data.zip_status as string;
+
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              zip_status: nextStatus,
+              zip_error_message: null,
+            }
+          : current
+      );
+
+      if (nextStatus === 'ready') {
+        triggerZipDownload();
+        setShouldAutoDownloadZip(false);
+        setZipMessage('Your ZIP download should start shortly.');
+      }
+    } catch (err: any) {
+      setShouldAutoDownloadZip(false);
+      setZipError(err.response?.data?.detail || 'Failed to prepare ZIP download.');
+      setZipMessage('');
+    }
+  };
+
+  useEffect(() => {
+    if (!result) {
+      return;
+    }
+
+    if (result.zip_status === 'ready' && shouldAutoDownloadZip) {
+      triggerZipDownload();
+      setShouldAutoDownloadZip(false);
+      setZipError('');
+      setZipMessage('Your ZIP download should start shortly.');
+      return;
+    }
+
+    if (result.zip_status === 'failed') {
+      setShouldAutoDownloadZip(false);
+      if (result.zip_error_message) {
+        setZipError(result.zip_error_message);
+      }
+      if (!result.zip_error_message) {
+        setZipMessage('');
+      }
+      return;
+    }
+
+    if (result.zip_status === 'processing') {
+      setZipError('');
+      setZipMessage('Preparing your ZIP. This can take a minute for larger albums.');
+    }
+  }, [result?.zip_status, result?.zip_error_message, shouldAutoDownloadZip]);
 
   if (loading) {
     return (
@@ -130,11 +233,33 @@ export default function ResultsPage() {
     );
   }
 
+  const notes =
+    result.result_mode === 'source_links'
+      ? [
+          'Each tile opens the original photo in Google Drive.',
+          'Download all matches as one ZIP if you want everything in one hit.',
+          'Nothing was copied, so this avoids Google Drive quota issues.',
+          'If the match set feels off, rerun with a cleaner selfie.',
+        ]
+      : [
+          'Open the result folder directly in Google Drive and download the keepers.',
+          'The source folder stays untouched. WhoDis creates a separate curated output.',
+          'If the hit rate feels low, rerun with a cleaner selfie in brighter light.',
+        ];
+
   const stats = [
     { label: 'Matches found', value: result.matched_images.toString() },
     { label: 'Preview tiles', value: result.preview_urls.length.toString() },
     { label: 'Job tag', value: result.job_id.slice(0, 8).toUpperCase() },
   ];
+  const zipButtonLabel =
+    result.zip_status === 'ready'
+      ? 'Download ZIP'
+      : result.zip_status === 'processing'
+        ? 'Preparing ZIP...'
+        : result.zip_status === 'failed'
+          ? 'Retry ZIP'
+          : 'Prepare ZIP';
 
   return (
     <div className="relative min-h-screen overflow-hidden px-5 py-6 sm:px-8">
@@ -172,7 +297,9 @@ export default function ResultsPage() {
                 Found {result.matched_images} photos that actually have you in them.
               </h1>
               <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-300">
-                Open the curated Drive folder, skim the preview wall, and keep the shots that matter without touching the original album.
+                {result.result_mode === 'source_links'
+                  ? 'Open the matched originals directly in Drive, skim the preview wall, and keep the shots that matter.'
+                  : 'Open the curated Drive folder, skim the preview wall, and keep the shots that matter without touching the original album.'}
               </p>
 
               <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -191,15 +318,25 @@ export default function ResultsPage() {
                   rel="noopener noreferrer"
                   className="accent-button px-6 py-4 text-center text-sm uppercase tracking-[0.16em]"
                 >
-                  Open Google Drive folder
+                  {result.result_mode === 'source_links' ? 'Open source Drive folder' : 'Open Google Drive folder'}
                 </a>
 
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {result.result_mode === 'source_links' && result.matched_files.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleZipAction}
+                      disabled={result.zip_status === 'processing'}
+                      className="ghost-button px-6 py-4 text-center text-sm uppercase tracking-[0.16em]"
+                    >
+                      {zipButtonLabel}
+                    </button>
+                  )}
                   <button
                     onClick={copyFolderLink}
                     className="ghost-button px-6 py-4 text-sm uppercase tracking-[0.16em]"
                   >
-                    {copied ? 'Folder link copied' : 'Copy folder link'}
+                    {copied ? 'Link copied' : 'Copy Drive link'}
                   </button>
                   <button
                     onClick={() => router.push('/')}
@@ -208,6 +345,18 @@ export default function ResultsPage() {
                     Run another scan
                   </button>
                 </div>
+
+                {(zipMessage || zipError) && (
+                  <div
+                    className={`rounded-2xl px-5 py-4 text-sm leading-6 ${
+                      zipError
+                        ? 'border border-red-400/25 bg-red-400/10 text-red-100'
+                        : 'border border-cyan-300/20 bg-cyan-400/10 text-cyan-100'
+                    }`}
+                  >
+                    {zipError || zipMessage}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -271,16 +420,53 @@ export default function ResultsPage() {
                 <div className="mt-8 rounded-[1.75rem] border border-dashed border-white/12 bg-white/[0.03] p-8 text-center">
                   <p className="text-2xl font-semibold text-white">No preview thumbnails available.</p>
                   <p className="mt-3 text-base leading-7 text-slate-400">
-                    The Drive folder is still ready. Open it above to see the full result set.
+                    The matched results are still ready. Open them below in Drive.
                   </p>
                 </div>
               )}
             </div>
 
+            {result.matched_files.length > 0 && (
+              <div className="panel-soft rounded-[2rem] p-6">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Matched files</p>
+                    <h2 className="mt-2 font-display text-3xl font-semibold text-white">Open the originals.</h2>
+                  </div>
+                  <p className="text-sm text-slate-400">{result.matched_files.length} Drive links ready</p>
+                </div>
+
+                <div className="mt-6 space-y-3">
+                  {result.matched_files.map((file, index) => (
+                    <div
+                      key={file.file_id}
+                      className="flex flex-col gap-4 rounded-[1.5rem] border border-white/8 bg-white/[0.03] p-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          Match {index + 1}
+                        </p>
+                        <p className="mt-2 truncate text-base text-slate-200">{file.name}</p>
+                      </div>
+
+                      <a
+                        href={file.view_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ghost-button shrink-0 px-5 py-3 text-center text-sm uppercase tracking-[0.16em]"
+                      >
+                        Open in Drive
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="panel-soft rounded-[2rem] p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Done with this run?</p>
               <p className="mt-3 text-lg leading-8 text-slate-200">
-                Grab your favorites, share the folder if needed, or rerun with a cleaner selfie if you want a tighter match set.
+                Grab your favorites in Drive, then rerun with a cleaner selfie if you want a tighter match set.
               </p>
             </div>
           </div>
