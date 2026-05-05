@@ -2,6 +2,7 @@
 API configuration loaded from environment variables.
 """
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
@@ -25,13 +26,14 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",  # Next.js dev
-        "https://whodis.app",     # Production UI
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
-    CORS_ORIGIN_REGEX: Optional[str] = r"https://.*\.vercel\.app"
+    CORS_ORIGIN_REGEX: Optional[str] = None
     
-    # Database (PostgreSQL)
-    DATABASE_URL: str = "postgresql://user:password@localhost:5432/whodis"
+    # Database. SQLite is the local default; set DATABASE_URL to PostgreSQL only
+    # if you intentionally want an external database.
+    DATABASE_URL: str = "sqlite:///./whodis.db"
     
     # Google Drive Service Account
     GOOGLE_SERVICE_ACCOUNT_FILE: str = "service-account.json"
@@ -46,9 +48,9 @@ class Settings(BaseSettings):
     MAX_IMAGE_DIMENSION: int = 1600
     
     # Job Settings
-    MAX_IMAGES_PER_JOB: int = 200  # Limit to prevent abuse and memory spikes
+    MAX_IMAGES_PER_JOB: int = 1000
     JOB_TIMEOUT_MINUTES: int = 30  # Max time for a job
-    MAX_CONCURRENT_JOBS: int = 1  # Lightweight Render deployment processes one scan at a time
+    MAX_CONCURRENT_JOBS: int = 1
     
     # Cleanup
     AUTO_DELETE_RESULTS_DAYS: int = 7  # Delete result folders after N days
@@ -59,10 +61,10 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
-    EMAIL_FROM: str = "noreply@whodis.app"
+    EMAIL_FROM: str = "noreply@localhost"
     
     # Storage
-    TEMP_STORAGE_PATH: str = "/tmp/whodis"
+    TEMP_STORAGE_PATH: str = "./local_data/temp"
     
     # Rate Limiting
     MAX_JOBS_PER_IP_PER_DAY: int = 10
@@ -75,6 +77,20 @@ class Settings(BaseSettings):
     HF_VISION_MODEL: str = "Qwen/Qwen2.5-VL-3B-Instruct"
     HF_TEXT_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
     HF_IMAGE_CAPTION_MODEL: str = ""  # Deprecated legacy key kept for backwards compatibility.
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_flag(cls, value):
+        if isinstance(value, str) and value.lower() in {"release", "prod", "production"}:
+            return False
+        return value
+
+    @field_validator("CORS_ORIGIN_REGEX", mode="before")
+    @classmethod
+    def blank_regex_is_none(cls, value):
+        if value == "":
+            return None
+        return value
 
 
 # Global settings instance

@@ -6,7 +6,8 @@ Main application entry point
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
-from pydantic import BaseModel, EmailStr
+from starlette.background import BackgroundTask
+from pydantic import BaseModel
 from typing import Optional
 import uuid
 import json
@@ -37,7 +38,7 @@ async def startup_event():
 # CORS - Allow the UI to call the API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,  # e.g., ["https://whodis.app", "http://localhost:3000"]
+    allow_origins=settings.CORS_ORIGINS,
     allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
@@ -53,7 +54,7 @@ class JobSubmitRequest(BaseModel):
     """Request to create a new job"""
     drive_folder_url: str
     selfie_base64: str  # Base64-encoded image
-    user_email: Optional[EmailStr] = None
+    user_email: Optional[str] = None
 
 
 class JobStatusResponse(BaseModel):
@@ -162,7 +163,7 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
         # Generate job ID
         job_id = str(uuid.uuid4())
         
-        # Save selfie to temp storage (S3/local)
+        # Save selfie to local temp storage.
         selfie_path = await save_selfie_temp(job_id, request.selfie_base64)
         
         worker_busy = is_worker_busy()
@@ -363,6 +364,7 @@ async def download_job_results(job_id: str):
             path=job.zip_path,
             media_type="application/zip",
             filename=f"whodis-{job_id[:8]}-matches.zip",
+            background=BackgroundTask(delete_zip_archive, job.job_id, job.zip_path),
         )
     finally:
         db.close()
@@ -389,8 +391,8 @@ async def cancel_job(job_id: str):
         job.completed_at = datetime.utcnow()
         db.commit()
         
-        # The lightweight deployment runs jobs in-process, so cancellation
-        # only updates the stored job state.
+        # Jobs run in-process locally, so cancellation only updates the stored
+        # job state.
         
         return {"message": "Job cancelled"}
     
@@ -426,11 +428,6 @@ async def save_selfie_temp(job_id: str, selfie_base64: str) -> str:
     """
     Save selfie to temporary storage
     
-    Options:
-    1. Local filesystem (/tmp/)
-    2. S3/Cloud Storage
-    3. Database (if small)
-    
     Returns:
         Path/URL to saved selfie
     """
@@ -440,16 +437,32 @@ async def save_selfie_temp(job_id: str, selfie_base64: str) -> str:
     # Decode base64
     image_data = base64.b64decode(selfie_base64)
     
-    # Save to temp directory
-    temp_dir = "/tmp/whodis/selfies"
+    # Save to local temp directory. The processing task deletes this after use
+    # when DELETE_SELFIE_AFTER_PROCESSING is enabled.
+    temp_dir = os.path.join(settings.TEMP_STORAGE_PATH, "selfies")
     os.makedirs(temp_dir, exist_ok=True)
     
-    selfie_path = f"{temp_dir}/{job_id}.jpg"
+    selfie_path = os.path.join(temp_dir, f"{job_id}.jpg")
     
     with open(selfie_path, 'wb') as f:
         f.write(image_data)
     
     return selfie_path
+
+
+def delete_zip_archive(job_id: str, zip_path: str):
+    """Delete a downloaded ZIP archive after FastAPI finishes sending it."""
+    try:
+        if zip_path and os.path.exists(zip_path):
+            os.remove(zip_path)
+    finally:
+        update_job_fields(
+            job_id,
+            zip_status="idle",
+            zip_path=None,
+            zip_error_message=None,
+            zip_generated_at=None,
+        )
 
 
 def get_folder_preview_urls(folder_id: str, limit: int = 10) -> list[str]:

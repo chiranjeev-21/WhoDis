@@ -1,8 +1,8 @@
 """
 Background job processing helpers.
 
-Jobs run inside the API service using FastAPI background tasks so the
-deployment can stay on a single low-cost web service.
+Jobs run inside the API service using FastAPI background tasks, which keeps
+the local app to one backend process.
 """
 
 import os
@@ -135,7 +135,7 @@ def _run_job(job_id: str):
                     except Exception as cleanup_error:
                         logger.warning(f"Job {job_id}: Failed to cleanup temp file {temp_path}: {cleanup_error}")
 
-                # Explicit collection keeps the lightweight Render instance more stable.
+                # Explicit collection keeps long local scans steady.
                 if idx % 10 == 0:
                     gc.collect()
         
@@ -244,8 +244,7 @@ def cleanup_old_results_task():
     """
     Manual cleanup helper for old result folders.
 
-    Automatic scheduling is intentionally omitted in the lightweight
-    single-service deployment.
+    Automatic scheduling is intentionally omitted for the local single-service app.
     """
     from database import cleanup_old_results
 

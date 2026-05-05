@@ -1,18 +1,26 @@
 """
 Database Models
-SQLAlchemy ORM models for PostgreSQL
+SQLAlchemy ORM models for local SQLite by default, with optional PostgreSQL.
 """
 
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Enum as SQLEnum, Boolean, text
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Enum as SQLEnum, Boolean, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from enum import Enum as PyEnum
+from pathlib import Path
 
 from config import settings
 
 # Database engine
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+connect_args = {}
+if settings.DATABASE_URL.startswith("sqlite"):
+    sqlite_path = settings.DATABASE_URL.replace("sqlite:///", "", 1)
+    if sqlite_path not in {":memory:", ""}:
+        Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+    connect_args["check_same_thread"] = False
+
+engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -108,23 +116,25 @@ def init_db():
     Safe to call on every API startup
     """
     Base.metadata.create_all(bind=engine)
-    with engine.begin() as connection:
-        connection.execute(
-            text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS matched_files_json TEXT")
-        )
-        connection.execute(
-            text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS zip_status VARCHAR(32)")
-        )
-        connection.execute(
-            text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS zip_path TEXT")
-        )
-        connection.execute(
-            text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS zip_error_message TEXT")
-        )
-        connection.execute(
-            text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS zip_generated_at TIMESTAMP")
-        )
+    ensure_job_columns()
     print("✓ Database tables created")
+
+
+def ensure_job_columns():
+    """Add newer job columns when an older local database already exists."""
+    existing_columns = {column["name"] for column in inspect(engine).get_columns("jobs")}
+    migrations = {
+        "matched_files_json": "TEXT",
+        "zip_status": "VARCHAR(32)",
+        "zip_path": "TEXT",
+        "zip_error_message": "TEXT",
+        "zip_generated_at": "TIMESTAMP",
+    }
+
+    with engine.begin() as connection:
+        for column_name, column_type in migrations.items():
+            if column_name not in existing_columns:
+                connection.execute(text(f"ALTER TABLE jobs ADD COLUMN {column_name} {column_type}"))
 
 
 def get_db():

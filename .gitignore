@@ -7,6 +7,13 @@ node_modules/
 .next/
 ui/tsconfig.tsbuildinfo
 
+# Local runtime data
+api/.venv/
+api/.conda/
+api/whodis.db
+api/whodis.db-*
+api/local_data/
+
 .DS_Store
 
 # Local secrets

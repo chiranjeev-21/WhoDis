@@ -1,39 +1,37 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: whodis
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # FastAPI API
   api:
     build:
       context: ./api
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - ./api/.env
     environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/whodis
+      - DATABASE_URL=sqlite:///./local_data/whodis.db
+      - TEMP_STORAGE_PATH=./local_data/temp
+      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000"]
+      - CORS_ORIGIN_REGEX=
     volumes:
       - ./api:/app
-      - /tmp/whodis:/tmp/whodis
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - ./api/local_data:/app/local_data
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
+  ui:
+    image: node:20-alpine
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./ui:/app
+      - ui_node_modules:/app/node_modules
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - api
+
 volumes:
-  postgres_data:
+  ui_node_modules:

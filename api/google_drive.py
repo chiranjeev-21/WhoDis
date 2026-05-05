@@ -29,14 +29,13 @@ def get_drive_service():
     Get authenticated Drive service using Service Account
     
     Supports two methods:
-    1. JSON string in environment variable (Render/cloud deployment)
-    2. JSON file in project root (local development)
+    1. JSON string in environment variable
+    2. JSON file in the API directory for local development
     """
     import json
     
     SCOPES = ['https://www.googleapis.com/auth/drive']
     
-    # Check if JSON is in environment variable (Render deployment)
     if os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON'):
         logger.info("Loading service account from environment variable")
         service_account_info = json.loads(os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON'))
@@ -338,8 +337,8 @@ def build_results_zip(file_entries: List[Dict], archive_name_prefix: str) -> Pat
     """
     Download matched source files one by one and package them into a ZIP.
 
-    The archive is created in temporary storage and should be deleted by the
-    caller after the response is sent.
+    The archive is created in local temporary storage and deleted after the
+    response is sent.
     """
     archive_dir = Path(settings.TEMP_STORAGE_PATH) / "archives"
     archive_dir.mkdir(parents=True, exist_ok=True)

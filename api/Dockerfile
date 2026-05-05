@@ -18,11 +18,11 @@ RUN python -c "import onnxruntime; print(onnxruntime.__version__)"
 # Copy application code
 COPY . .
 
-# Create temp directory
-RUN mkdir -p /tmp/whodis
+# Create local runtime directory
+RUN mkdir -p /app/local_data/temp
 
 # Expose port
 EXPOSE 8000
 
-# Run application. Render injects PORT in production; default to 8000 locally.
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run application locally.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -173,8 +173,8 @@ class FaceRecognitionService:
         """
         Load and downscale images before face detection to reduce peak memory.
 
-        The free Render instance is memory-constrained, and original phone photos
-        can be much larger than the model needs for accurate matching.
+        Original phone photos can be much larger than the model needs for
+        accurate matching, so local processing downscales before inference.
         """
         img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if img is None:

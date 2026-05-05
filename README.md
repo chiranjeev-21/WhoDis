@@ -4,7 +4,17 @@ A fun project built to solve a very real problem: when a group of friends goes o
 Current architecture:
 - `ui/` is the Next.js frontend.
 - `api/` is the FastAPI service.
-- Jobs run inside the API service via FastAPI background tasks, so Redis and a separate Celery worker are no longer required.
+- Jobs run inside the API service via FastAPI background tasks.
+- Local SQLite is the default database, so Postgres/Render/Vercel are not required.
+- Images are downloaded from Google Drive for local processing, cleaned up as each file finishes, and optional ZIP downloads are removed after download.
+
+Run locally:
+
+```bash
+./start-local.sh
+```
+
+Open `http://localhost:3000`.
 
 [GenAI Ref](https://chatgpt.com/share/696f653e-d9b8-800a-8cc3-f7a1e60de456)
 
