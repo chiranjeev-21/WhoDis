@@ -231,6 +231,8 @@ def cleanup_old_results(days: int = 7):
     Run this periodically (e.g., daily cron job)
     """
     from datetime import timedelta
+    import shutil
+    from pathlib import Path
     from google_drive import delete_drive_folder
     
     cutoff_date = datetime.utcnow() - timedelta(days=days)
@@ -247,13 +249,18 @@ def cleanup_old_results(days: int = 7):
         for job in old_jobs:
             if job.zip_path:
                 try:
-                    from pathlib import Path
-
                     zip_path = Path(job.zip_path)
                     if zip_path.exists():
                         zip_path.unlink()
                 except Exception as e:
                     print(f"✗ Failed to delete ZIP for job {job.job_id}: {e}")
+
+            try:
+                match_dir = Path(settings.TEMP_STORAGE_PATH) / "matches" / job.job_id
+                if match_dir.exists():
+                    shutil.rmtree(match_dir)
+            except Exception as e:
+                print(f"✗ Failed to delete local matches for job {job.job_id}: {e}")
 
             if job.result_folder_id:
                 try:

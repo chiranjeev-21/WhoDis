@@ -335,7 +335,11 @@ def get_files_result_data(file_ids: List[str], file_names_by_id: Dict[str, str] 
 
 def build_results_zip(file_entries: List[Dict], archive_name_prefix: str) -> Path:
     """
-    Download matched source files one by one and package them into a ZIP.
+    Package matched files into a ZIP.
+
+    New local jobs save matched originals during scanning, so ZIP creation can
+    use those cached files without re-downloading from Drive. Older jobs fall
+    back to Drive downloads.
 
     The archive is created in local temporary storage and deleted after the
     response is sent.
@@ -362,12 +366,21 @@ def build_results_zip(file_entries: List[Dict], archive_name_prefix: str) -> Pat
                     continue
 
                 original_name = file_entry.get("name") or f"match_{index}.jpg"
-                archive_name = _get_unique_archive_name(original_name, index, name_counts)
+                archive_name = _get_unique_archive_name(
+                    file_entry.get("local_name") or original_name,
+                    index,
+                    name_counts,
+                )
                 temp_path = None
 
                 try:
-                    temp_path = download_image_to_temp(file_id, archive_name)
-                    archive.write(temp_path, arcname=archive_name)
+                    local_path_value = file_entry.get("local_path")
+                    local_path = Path(local_path_value) if local_path_value else None
+                    if local_path is not None and local_path.exists() and local_path.is_file():
+                        archive.write(local_path, arcname=archive_name)
+                    else:
+                        temp_path = download_image_to_temp(file_id, archive_name)
+                        archive.write(temp_path, arcname=archive_name)
                     successful_files += 1
                 except Exception as e:
                     logger.warning(f"Failed to add {file_id} to ZIP archive: {e}")

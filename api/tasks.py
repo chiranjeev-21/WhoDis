@@ -9,6 +9,8 @@ import os
 import logging
 import gc
 import json
+import shutil
+from pathlib import Path
 from threading import BoundedSemaphore
 from datetime import datetime
 
@@ -56,12 +58,12 @@ def _run_job(job_id: str):
                          progress=5,
                          current_message="Processing your selfie...")
         
-        selfie_embedding = face_service.extract_selfie_embedding(job.selfie_path)
+        selfie_profile = face_service.extract_selfie_semantic_profile(job.selfie_path)
         
-        if selfie_embedding is None:
+        if selfie_profile is None:
             raise Exception("No face detected in selfie. Please upload a clear photo.")
         
-        logger.info(f"Job {job_id}: Selfie processed, embedding extracted")
+        logger.info(f"Job {job_id}: Selfie processed, semantic profile extracted")
         
         # ====================================================================
         # STEP 2: List images from user's Drive folder
@@ -83,7 +85,7 @@ def _run_job(job_id: str):
         update_job_status(job_id, JobStatus.PROCESSING,
                          total_images=total_images,
                          progress=15,
-                         current_message=f"Found {total_images} images. Starting face detection...")
+                         current_message=f"Found {total_images} images. Starting face and semantic detection...")
         
         logger.info(f"Job {job_id}: Found {total_images} images")
         
@@ -93,6 +95,7 @@ def _run_job(job_id: str):
         
         matched_files = []
         processed_count = 0
+        name_counts: dict[str, int] = {}
         
         for idx, image_file in enumerate(image_files, 1):
             file_id = image_file['id']
@@ -103,19 +106,26 @@ def _run_job(job_id: str):
                 # Download image to temp
                 temp_path = download_image_to_temp(file_id, file_name)
                 
-                # Detect faces and check for matches
-                is_match = face_service.check_image_for_match(
-                    temp_path,
-                    selfie_embedding,
-                    threshold=settings.MATCH_THRESHOLD
-                )
+                # Detect confident face matches first, then semantic/body clues.
+                match_result = face_service.classify_image_match(temp_path, selfie_profile)
                 
-                if is_match:
+                if match_result["is_match"]:
+                    local_result = persist_matched_file(job_id, temp_path, file_name, idx, name_counts)
                     matched_files.append({
                         "file_id": file_id,
                         "name": file_name,
+                        "local_path": str(local_result["path"]),
+                        "local_name": local_result["name"],
+                        "match_type": match_result["match_type"],
+                        "score": match_result["score"],
                     })
-                    logger.info(f"Job {job_id}: Match found in {file_name}")
+                    logger.info(
+                        "Job %s: %s match found in %s (score %.3f)",
+                        job_id,
+                        match_result["match_type"],
+                        file_name,
+                        match_result["score"],
+                    )
                 
                 processed_count += 1
                 
@@ -123,7 +133,7 @@ def _run_job(job_id: str):
                 progress = 15 + int((processed_count / total_images) * 70)  # 15% to 85%
                 update_job_status(job_id, JobStatus.PROCESSING,
                                 progress=progress,
-                                current_message=f"Processing image {processed_count}/{total_images}... ({len(matched_files)} matches so far)")
+                                current_message=f"Processing image {processed_count}/{total_images}... ({len(matched_files)} face/semantic matches so far)")
             
             except Exception as e:
                 logger.warning(f"Job {job_id}: Failed to process {file_name}: {e}")
@@ -151,7 +161,7 @@ def _run_job(job_id: str):
                             zip_path=None,
                             zip_error_message=None,
                             zip_generated_at=None,
-                            current_message="No matches found. Try a different selfie or check your Drive folder.")
+                            current_message="No matches found. Try a selfie with more face and clothing visible, or check your Drive folder.")
             log_analytics('job_completed_no_matches', job_id=job_id)
             return
         
@@ -190,7 +200,7 @@ def _run_job(job_id: str):
                          zip_path=None,
                          zip_error_message=None,
                          zip_generated_at=None,
-                         current_message=f"✓ Complete! Found {matched_count} photos with you.")
+                         current_message=f"✓ Complete! Found {matched_count} photos with you, including semantic matches.")
         
         log_analytics('job_completed', job_id=job_id, 
                      event_data=f'{{"matched": {matched_count}, "total": {total_images}}}')
@@ -238,6 +248,46 @@ def process_job_task(job_id: str):
         _run_job(job_id)
     finally:
         _job_slots.release()
+
+
+def persist_matched_file(
+    job_id: str,
+    source_path: Path,
+    original_name: str,
+    index: int,
+    name_counts: dict[str, int],
+) -> dict:
+    """Copy a matched image into the job's local results cache."""
+    result_dir = Path(settings.TEMP_STORAGE_PATH) / "matches" / job_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = get_unique_local_name(original_name, index, name_counts)
+    result_path = result_dir / safe_name
+    shutil.copy2(source_path, result_path)
+    return {"path": result_path, "name": safe_name}
+
+
+def get_unique_local_name(file_name: str, index: int, name_counts: dict[str, int]) -> str:
+    """Create a stable local filename for matched results."""
+    base_name = Path(file_name).name.strip() or f"match_{index}.jpg"
+    safe_chars = []
+    for char in base_name:
+        if char.isalnum() or char in {".", "-", "_", " "}:
+            safe_chars.append(char)
+        else:
+            safe_chars.append("_")
+
+    safe_name = "".join(safe_chars).strip() or f"match_{index}.jpg"
+    stem = Path(safe_name).stem or f"match_{index}"
+    suffix = Path(safe_name).suffix or ".jpg"
+
+    occurrence = name_counts.get(safe_name, 0)
+    name_counts[safe_name] = occurrence + 1
+
+    if occurrence == 0:
+        return f"{stem}{suffix}"
+
+    return f"{stem}_{occurrence + 1}{suffix}"
 
 
 def cleanup_old_results_task():

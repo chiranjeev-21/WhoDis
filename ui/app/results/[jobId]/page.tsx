@@ -20,8 +20,16 @@ interface JobResult {
     name: string;
     view_url: string;
     thumbnail_url?: string | null;
+    match_type?: string;
+    score?: number | null;
   }[];
 }
+
+const matchTypeLabel: Record<string, string> = {
+  face: 'Face',
+  partial_face: 'Partial face',
+  body_semantic: 'Semantic',
+};
 
 export default function ResultsPage() {
   const router = useRouter();
@@ -287,7 +295,7 @@ export default function ResultsPage() {
       ? [
           'Each tile opens the original photo in Google Drive.',
           'Download all matches as one ZIP if you want everything in one hit.',
-          'Nothing was copied, so this avoids Google Drive quota issues.',
+          'Semantic matches catch likely back-turned, half-face, or hard-to-see photos using local visual clues.',
           'If the match set feels off, rerun with a cleaner selfie.',
         ]
       : [
@@ -374,21 +382,32 @@ export default function ResultsPage() {
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {result.result_mode === 'source_links' && result.matched_files.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleZipAction}
-                      disabled={result.zip_status === 'processing' || zipDownloading}
-                      className="ghost-button px-6 py-4 text-center text-sm uppercase tracking-[0.16em]"
-                    >
-                      {zipButtonLabel}
-                    </button>
+                    result.zip_status === 'ready' ? (
+                      <a
+                        href={`${API_URL}/api/results/${jobId}/download`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ghost-button px-6 py-4 text-center text-sm uppercase tracking-[0.16em]"
+                      >
+                        Download ZIP
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleZipAction}
+                        disabled={result.zip_status === 'processing' || zipDownloading}
+                        className="ghost-button px-6 py-4 text-center text-sm uppercase tracking-[0.16em]"
+                      >
+                        {zipButtonLabel}
+                      </button>
+                    )
                   )}
-                  <button
-                    onClick={() => router.push('/social-studio')}
-                    className="ghost-button px-6 py-4 text-sm uppercase tracking-[0.16em]"
+                  <a
+                    href="/social-studio"
+                    className="ghost-button px-6 py-4 text-center text-sm uppercase tracking-[0.16em]"
                   >
                     Social studio
-                  </button>
+                  </a>
                   <button
                     onClick={copyFolderLink}
                     className="ghost-button px-6 py-4 text-sm uppercase tracking-[0.16em]"
@@ -491,7 +510,7 @@ export default function ResultsPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Matched files</p>
                     <h2 className="mt-2 font-display text-3xl font-semibold text-white">Open the originals.</h2>
                   </div>
-                  <p className="text-sm text-slate-400">{result.matched_files.length} Drive links ready</p>
+                    <p className="text-sm text-slate-400">{result.matched_files.length} Drive links ready</p>
                 </div>
 
                 <div className="mt-6 space-y-3">
@@ -505,6 +524,16 @@ export default function ResultsPage() {
                           Match {index + 1}
                         </p>
                         <p className="mt-2 truncate text-base text-slate-200">{file.name}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-100">
+                            {matchTypeLabel[file.match_type || 'face'] || 'Match'}
+                          </span>
+                          {typeof file.score === 'number' && (
+                            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                              {Math.round(file.score * 100)}%
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <a

@@ -502,7 +502,19 @@ def get_matched_file_results(stored_matches: list[dict]) -> list[dict]:
         if item.get("file_id")
     }
 
-    return get_files_result_data(file_ids, file_names_by_id=file_names_by_id)
+    result_data = get_files_result_data(file_ids, file_names_by_id=file_names_by_id)
+    stored_by_id = {
+        item["file_id"]: item
+        for item in stored_matches
+        if item.get("file_id")
+    }
+
+    for result in result_data:
+        stored = stored_by_id.get(result["file_id"], {})
+        result["match_type"] = stored.get("match_type", "face")
+        result["score"] = stored.get("score")
+
+    return result_data
 
 
 def normalize_zip_state(job: Job) -> tuple[str, Optional[str]]:

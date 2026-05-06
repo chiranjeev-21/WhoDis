@@ -7,6 +7,8 @@ Current architecture:
 - Jobs run inside the API service via FastAPI background tasks.
 - Local SQLite is the default database, so Postgres/Render/Vercel are not required.
 - Images are downloaded from Google Drive for local processing, cleaned up as each file finishes, and optional ZIP downloads are removed after download.
+- Matching now uses confident face matches first, then local semantic fallback for likely partial-face, back-turned, or face-hidden photos. Crowd scenes reject body-only guesses unless a face/partial-face match is present.
+- Matched originals are cached locally during scanning, so ZIP creation no longer re-downloads every match from Drive for new jobs.
 
 Run locally:
 

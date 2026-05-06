@@ -32,6 +32,18 @@ MAX_IMAGES_PER_JOB=1000
 
 Tune `MAX_IMAGES_PER_JOB`, `MAX_CONCURRENT_JOBS`, `MAX_IMAGE_DIMENSION`, and `MATCH_THRESHOLD` based on your machine.
 
+Semantic matching is enabled locally by default:
+
+```bash
+ENABLE_SEMANTIC_MATCHING=true
+PARTIAL_FACE_MATCH_THRESHOLD=0.28
+BODY_SEMANTIC_MATCH_THRESHOLD=0.68
+SEMANTIC_CROWD_FACE_LIMIT=3
+SEMANTIC_CROWD_PERSON_LIMIT=3
+```
+
+The app first captures confident face matches, then keeps likely partial-face or body/clothing matches for photos where your face is turned away or hard to see. Body-only semantic matching is disabled for crowd-like scenes, because those are too ambiguous unless your face or partial face is actually recognized. For best results, take a selfie that includes your face and some upper-body clothing.
+
 ## 3. Run Locally
 
 From the repo root:
@@ -68,6 +80,7 @@ Automatic cleanup covers:
 
 - Selfies after job processing
 - Downloaded Drive images after each image is scanned
+- Matched originals are saved under `api/local_data/temp/matches/<job_id>/` so ZIP downloads are fast
 - ZIP archives after they are downloaded
 - Social Studio extraction directories after analysis
 

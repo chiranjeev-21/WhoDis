@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
     ]
     CORS_ORIGIN_REGEX: Optional[str] = None
     
@@ -43,6 +45,11 @@ class Settings(BaseSettings):
     FACE_MODEL_NAME: str = "buffalo_l"
     DETECTION_THRESHOLD: float = 0.5
     MATCH_THRESHOLD: float = 0.4
+    ENABLE_SEMANTIC_MATCHING: bool = True
+    PARTIAL_FACE_MATCH_THRESHOLD: float = 0.28
+    BODY_SEMANTIC_MATCH_THRESHOLD: float = 0.68
+    SEMANTIC_CROWD_FACE_LIMIT: int = 2
+    SEMANTIC_CROWD_PERSON_LIMIT: int = 2
     EMBEDDING_DIM: int = 512
     FACE_DETECTION_SIZE: int = 640
     MAX_IMAGE_DIMENSION: int = 1600
